@@ -455,10 +455,17 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
 
-        state.aiInsertResultMode = request.readsClipboard
         let inputText: String
+        let insertsResult: Bool
 
-        if request.readsClipboard {
+        if request.readsClipboard,
+           let selection = textDocumentProxy.selectedText,
+           !selection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            wholeTextSnapshot = nil
+            state.wholeTextMode = false
+            inputText = selection
+            insertsResult = false
+        } else if request.readsClipboard {
             let clipboardText = UIPasteboard.general.string ?? ""
 
             guard !clipboardText
@@ -471,6 +478,7 @@ final class KeyboardViewController: UIInputViewController {
 
             wholeTextSnapshot = nil
             inputText = clipboardText
+            insertsResult = true
         } else if state.wholeTextMode {
             if let selection = textDocumentProxy.selectedText,
                !selection.isEmpty {
@@ -496,6 +504,7 @@ final class KeyboardViewController: UIInputViewController {
 
             wholeTextSnapshot = snapshot
             inputText = snapshot.text
+            insertsResult = false
         } else {
             guard let selection = textDocumentProxy.selectedText,
                   !selection
@@ -510,15 +519,17 @@ final class KeyboardViewController: UIInputViewController {
 
             wholeTextSnapshot = nil
             inputText = selection
+            insertsResult = false
         }
 
         requestTask?.cancel()
 
-        state.originalSelection = request.readsClipboard ? "" : inputText
+        state.aiInsertResultMode = insertsResult
+        state.originalSelection = insertsResult ? "" : inputText
         state.result = ""
         state.errorMessage = ""
         state.phase = .running
-        if request.readsClipboard {
+        if insertsResult {
             state.status = "Running \(request.label) from clipboard…"
         } else {
             state.status = state.wholeTextMode ?
@@ -546,9 +557,9 @@ final class KeyboardViewController: UIInputViewController {
                         sourceText: inputText,
                         request: request,
                         initialResult: result,
-                        insertsResult: request.readsClipboard
+                        insertsResult: insertsResult
                     )
-                    if request.readsClipboard {
+                    if insertsResult {
                         state.status = "Review before inserting"
                     } else {
                         state.status = state.wholeTextMode ?
@@ -557,7 +568,7 @@ final class KeyboardViewController: UIInputViewController {
                     }
 
                     updateHeight()
-                } else if request.readsClipboard {
+                } else if insertsResult {
                     insertGeneratedAnswer(result)
                 } else {
                     try commit(

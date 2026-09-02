@@ -367,7 +367,12 @@ struct KeyboardRootView: View {
     @ViewBuilder
     private func responseText(_ value: String) -> some View {
         if state.markdownPreviewEnabled,
-           let attributed = try? AttributedString(markdown: value) {
+           let attributed = try? AttributedString(
+                markdown: value,
+                options: AttributedString.MarkdownParsingOptions(
+                    interpretedSyntax: .inlineOnlyPreservingWhitespace
+                )
+           ) {
             Text(attributed)
         } else {
             Text(value)

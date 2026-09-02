@@ -96,7 +96,7 @@ private struct ActionEditor: View {
                     Text("Action")
                 } footer: {
                     if action.usesClipboard {
-                        Text("This action uses copied text instead of a selection. In the keyboard, its result is inserted at the cursor, so it also works with text you cannot edit.")
+                        Text("This action uses selected text when available and falls back to copied text. Clipboard results are inserted at the cursor, so it also works with text you cannot edit.")
                     }
                 }
 

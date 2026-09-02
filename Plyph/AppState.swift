@@ -113,7 +113,8 @@ final class AppState: ObservableObject {
     func run(_ request: ActionRequest) {
         let sourceText: String
 
-        if request.readsClipboard {
+        if request.readsClipboard,
+           input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             sourceText = UIPasteboard.general.string ?? ""
             input = sourceText
         } else {
