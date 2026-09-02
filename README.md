@@ -21,7 +21,7 @@
   <a href="#screenshots">Screenshots</a> ·
   <a href="#features">Features</a> ·
   <a href="#getting-started">Getting started</a> ·
-  <a href="#github-actions-build">Download</a> ·
+  <a href="#download">Download</a> ·
   <a href="#build-from-source">Build</a> ·
   <a href="#privacy">Privacy</a>
 </p>
@@ -70,11 +70,11 @@ Configure a provider in the app, enable the Plyph keyboard, and select text in a
 - **Cursor movement** — drag across the space bar to reposition the cursor.
 - **Multiple layouts** — English, German, Arabic, French, Spanish, Italian, Portuguese, Dutch, Turkish, and Russian.
 - **Provider choice** — Ollama, OpenAI, OpenRouter, Gemini, Groq, Cerebras, and Vercel AI Gateway.
-- **Private credentials** — API keys are stored in the shared iOS Keychain.
+- **Private credentials** — API keys are stored securely in the iOS Keychain and shared only between the Plyph app and keyboard extension.
 
 ## Getting started
 
-1. Open Plyph and configure a provider, API key, and model.
+1. Open Plyph and configure a provider and model. Add an API key when your provider requires one.
 2. Open **Settings > General > Keyboard > Keyboards > Add New Keyboard**.
 3. Select **Plyph**.
 4. Open the Plyph keyboard entry and enable **Allow Full Access**.
@@ -86,30 +86,28 @@ Some apps do not expose selected text to third-party keyboards. Copy the text fi
 
 - iOS 18 or newer
 - Xcode 16 or newer when building from source
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen) when building from source
 - A configured provider or reachable local Ollama server
 
-## GitHub Actions build
+## Download
 
-The `Build Plyph iOS IPA` workflow creates an ad-hoc-signed IPA that SideStore or AltStore can re-sign with your Apple ID.
+Download the latest `Plyph.ipa` from [GitHub Releases](https://github.com/ubaimutl/Plyph-IOS/releases/latest).
 
-1. Open the repository's **Actions** tab.
-2. Select **Build Plyph iOS IPA**.
-3. Choose **Run workflow** and wait for the build to finish.
-4. Download the **Plyph-iOS** artifact from the completed run.
-5. Extract the artifact to get `Plyph.ipa` and `Plyph.ipa.sha256`.
-
-The checksum can be verified on macOS with:
+The release also includes `Plyph.ipa.sha256` for verifying the download:
 
 ```sh
 shasum -a 256 -c Plyph.ipa.sha256
 ```
 
+The IPA is ad-hoc signed and intended to be re-signed by SideStore or AltStore.
+
 ### Install with SideStore
 
-1. In SideStore, enable **Use Main App's Provisioning Profile for App Extensions**. This is recommended because Plyph and its keyboard extension then use one App ID.
+1. In SideStore, enable **Use Main App's Provisioning Profile for App Extensions**.
 2. Import `Plyph.ipa` and keep the keyboard extension when SideStore signs the app.
 3. Refresh Plyph through SideStore before the development profile expires.
+
+Using the main app's provisioning profile for extensions is recommended so Plyph and its keyboard extension can use one App ID.
 
 ### Install with AltStore
 
@@ -119,6 +117,15 @@ shasum -a 256 -c Plyph.ipa.sha256
 4. Refresh Plyph through AltStore before the development profile expires.
 
 After installation, open Plyph once and then follow the keyboard setup steps under [Getting started](#getting-started).
+
+## GitHub Actions builds
+
+The `Build Plyph iOS IPA` workflow builds the latest version from `main`.
+
+Development builds are available as the **Plyph-iOS** artifact on completed workflow runs. Each artifact contains:
+
+- `Plyph.ipa`
+- `Plyph.ipa.sha256`
 
 ## Build from source
 
@@ -134,7 +141,7 @@ open Plyph.xcodeproj
 
 Choose the `Plyph` scheme and run it on an iPhone or iPad. The app and keyboard extension use an App Group and shared Keychain access group, so your signing team must support both entitlements.
 
-To create an unsigned IPA for sideloading:
+To create an ad-hoc-signed IPA for sideloading:
 
 ```sh
 ./scripts/build-ipa.sh
