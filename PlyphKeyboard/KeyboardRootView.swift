@@ -359,7 +359,7 @@ struct KeyboardRootView: View {
                 onSelectResponse(message.id)
             }
             .accessibilityAddTraits(
-                isActive ? .isSelected : AccessibilityTraits(rawValue: 0)
+                isActive ? .isSelected : AccessibilityTraits()
             )
         }
     }
