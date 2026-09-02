@@ -31,6 +31,9 @@ final class KeyboardViewController: UIInputViewController {
             onReplace: { [weak self] in
                 self?.replaceSelection()
             },
+            onCopy: { [weak self] in
+                self?.copyConversationResult()
+            },
             onCancel: { [weak self] in
                 self?.cancelReview()
             },
@@ -45,6 +48,22 @@ final class KeyboardViewController: UIInputViewController {
             },
             onCancelAsk: { [weak self] in
                 self?.cancelAskComposer()
+            },
+            onStartFollowUp: { [weak self] in
+                self?.startFollowUpComposer()
+            },
+            onSendFollowUp: { [weak self] in
+                self?.sendFollowUp()
+            },
+            onCollapseFollowUp: { [weak self] in
+                self?.state.collapseFollowUpComposer()
+                self?.updateHeight()
+            },
+            onSelectResponse: { [weak self] id in
+                self?.state.selectConversationResponse(id)
+            },
+            onToggleMarkdown: { [weak self] in
+                self?.state.markdownPreviewEnabled.toggle()
             },
             onCursorMove: { [weak self] movement in
                 self?.moveCursor(movement)
@@ -139,18 +158,24 @@ final class KeyboardViewController: UIInputViewController {
     private func updateHeight() {
         let targetHeight: CGFloat
 
-        switch state.phase {
-        case .idle, .done:
-            targetHeight = KeyboardMetrics.normalHeight
+        if state.isConversationActive {
+            targetHeight = state.aiComposerMode ?
+                KeyboardMetrics.conversationTypingHeight :
+                KeyboardMetrics.conversationHeight
+        } else {
+            switch state.phase {
+            case .idle, .done:
+                targetHeight = KeyboardMetrics.normalHeight
 
-        case .running:
-            targetHeight = KeyboardMetrics.normalHeight
+            case .running:
+                targetHeight = KeyboardMetrics.normalHeight
 
-        case .review:
-            targetHeight = KeyboardMetrics.reviewHeight
+            case .review:
+                targetHeight = KeyboardMetrics.reviewHeight
 
-        case .error:
-            targetHeight = KeyboardMetrics.errorHeight
+            case .error:
+                targetHeight = KeyboardMetrics.errorHeight
+            }
         }
 
         guard heightConstraint?.constant != targetHeight else {
@@ -238,7 +263,11 @@ final class KeyboardViewController: UIInputViewController {
             state.suggestShift(for: state.aiInstruction)
 
         case .returnKey:
-            generateAskResponse()
+            if state.isConversationActive {
+                sendFollowUp()
+            } else {
+                generateAskResponse()
+            }
 
         case .shift:
             state.toggleShift()
@@ -372,8 +401,13 @@ final class KeyboardViewController: UIInputViewController {
                 try Task.checkCancellation()
 
                 if settings.reviewBeforeKeyboardReplacement {
-                    state.result = result
-                    state.phase = .review
+                    state.beginConversation(
+                        title: "Ask",
+                        sourceText: input,
+                        request: request,
+                        initialResult: result,
+                        insertsResult: true
+                    )
                     state.status = "Review generated answer"
                     updateHeight()
                 } else {
@@ -421,10 +455,23 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
 
-        state.aiInsertResultMode = false
+        state.aiInsertResultMode = request.readsClipboard
         let inputText: String
 
-        if state.wholeTextMode {
+        if request.readsClipboard {
+            let clipboardText = UIPasteboard.general.string ?? ""
+
+            guard !clipboardText
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty else {
+                state.show(error: "Copy some text before running this action.")
+                updateHeight()
+                return
+            }
+
+            wholeTextSnapshot = nil
+            inputText = clipboardText
+        } else if state.wholeTextMode {
             if let selection = textDocumentProxy.selectedText,
                !selection.isEmpty {
                 state.show(
@@ -467,13 +514,17 @@ final class KeyboardViewController: UIInputViewController {
 
         requestTask?.cancel()
 
-        state.originalSelection = inputText
+        state.originalSelection = request.readsClipboard ? "" : inputText
         state.result = ""
         state.errorMessage = ""
         state.phase = .running
-        state.status = state.wholeTextMode ?
-            "Running \(request.label) on whole text…" :
-            "Running \(request.label)…"
+        if request.readsClipboard {
+            state.status = "Running \(request.label) from clipboard…"
+        } else {
+            state.status = state.wholeTextMode ?
+                "Running \(request.label) on whole text…" :
+                "Running \(request.label)…"
+        }
 
         updateHeight()
 
@@ -490,13 +541,24 @@ final class KeyboardViewController: UIInputViewController {
                 try Task.checkCancellation()
 
                 if settings.reviewBeforeKeyboardReplacement {
-                    state.result = result
-                    state.phase = .review
-                    state.status = state.wholeTextMode ?
-                        "Review whole text before replacing" :
-                        "Review before replacing"
+                    state.beginConversation(
+                        title: request.label,
+                        sourceText: inputText,
+                        request: request,
+                        initialResult: result,
+                        insertsResult: request.readsClipboard
+                    )
+                    if request.readsClipboard {
+                        state.status = "Review before inserting"
+                    } else {
+                        state.status = state.wholeTextMode ?
+                            "Review whole text before replacing" :
+                            "Review before replacing"
+                    }
 
                     updateHeight()
+                } else if request.readsClipboard {
+                    insertGeneratedAnswer(result)
                 } else {
                     try commit(
                         result: result,
@@ -516,7 +578,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func replaceSelection() {
-        let result = state.result
+        let result = state.activeConversationResult
 
         guard !result.isEmpty else {
             return
@@ -539,6 +601,81 @@ final class KeyboardViewController: UIInputViewController {
             clearPendingWholeText()
             state.show(error: error.localizedDescription)
             updateHeight()
+        }
+    }
+
+    private func copyConversationResult() {
+        let result = state.activeConversationResult
+
+        guard !result.isEmpty else { return }
+
+        UIPasteboard.general.string = result
+        state.status = "Copied selected response"
+    }
+
+    private func startFollowUpComposer() {
+        guard state.phase == .review,
+              state.isConversationActive else {
+            return
+        }
+
+        state.beginFollowUpComposer()
+        state.status = "Ask for changes"
+        updateHeight()
+    }
+
+    private func sendFollowUp() {
+        guard state.isConversationActive,
+              state.phase == .review,
+              let request = state.conversationRequest,
+              !state.conversationSourceText.isEmpty else {
+            return
+        }
+
+        guard hasFullAccess else {
+            state.conversationError =
+                "Allow Full Access is required for follow-up requests."
+            return
+        }
+
+        guard state.appendFollowUp() != nil else { return }
+
+        requestTask?.cancel()
+
+        let sourceText = state.conversationSourceText
+        let history = state.providerConversationHistory
+        let settings = state.settings
+
+        state.phase = .running
+        state.status = "Updating response…"
+        updateHeight()
+
+        requestTask = Task {
+            do {
+                let response = try await AIClient().continueConversation(
+                    sourceText: sourceText,
+                    history: history,
+                    request: request,
+                    settings: settings
+                )
+
+                try Task.checkCancellation()
+
+                state.appendConversationResponse(response)
+                state.status = "Select a response or ask for changes"
+                updateHeight()
+            } catch is CancellationError {
+                if !state.conversationMessages.isEmpty {
+                    state.phase = .review
+                    state.status = "Follow-up cancelled"
+                }
+                updateHeight()
+            } catch {
+                state.phase = .review
+                state.conversationError = error.localizedDescription
+                state.status = "Could not update response"
+                updateHeight()
+            }
         }
     }
 

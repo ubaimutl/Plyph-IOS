@@ -1,7 +1,8 @@
 import Foundation
 
 enum Provider: String, Codable, CaseIterable, Identifiable {
-    case ollama, groq, gemini, openrouter, cerebras, openai, vercel
+    case ollama, groq, cloudflare, gemini, openrouter, cerebras, openai, vercel
+    case customOpenAI = "custom_openai"
 
     var id: String { rawValue }
 
@@ -9,25 +10,30 @@ enum Provider: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .ollama: "Ollama (local)"
         case .groq: "Groq"
+        case .cloudflare: "Cloudflare Workers AI"
         case .gemini: "Gemini"
         case .openrouter: "OpenRouter"
         case .cerebras: "Cerebras"
         case .openai: "OpenAI"
         case .vercel: "Vercel AI Gateway"
+        case .customOpenAI: "Custom OpenAI-Compatible"
         }
     }
 
-    var requiresAPIKey: Bool { self != .ollama }
+    var supportsAPIKey: Bool { self != .ollama }
+    var requiresAPIKey: Bool { self != .ollama && self != .customOpenAI }
 
     var defaultModel: String {
         switch self {
         case .ollama: "qwen3:4b"
         case .groq: "openai/gpt-oss-20b"
+        case .cloudflare: "@cf/qwen/qwen3-30b-a3b-fp8"
         case .gemini: "gemini-3.5-flash-lite"
         case .openrouter: "openrouter/free"
         case .cerebras: "gpt-oss-120b"
         case .openai: "gpt-4.1-mini"
         case .vercel: "openai/gpt-5.4-mini"
+        case .customOpenAI: ""
         }
     }
 }
@@ -130,6 +136,10 @@ struct AppSettings: Codable, Equatable {
         uniqueKeysWithValues: Provider.allCases.map { ($0.id, $0.defaultModel) }
     )
     var ollamaURL = "http://127.0.0.1:11434"
+    // Optional values keep settings saved by earlier releases decodable.
+    var customOpenAIBaseURL: String?
+    var cloudflareAccountID: String?
+    var cloudflareReasoningEnabled: Bool?
     var promptCorrect = "Correct grammar, spelling, punctuation, clarity, and style. Preserve the language, meaning, and tone. Return only the corrected text, unchanged if already correct."
     var promptRewrite = "Rewrite for clarity and natural flow. Preserve the language, meaning, and tone. Add no ideas or commentary. Return only the improved text."
     var promptRun = "Follow the provided instruction precisely. Produce the requested result directly. Do not add introductory commentary unless requested."
@@ -153,6 +163,21 @@ struct AppSettings: Codable, Equatable {
         return languages.isEmpty ? [.english] : languages
     }
 
+    var configuredCustomOpenAIBaseURL: String {
+        get { customOpenAIBaseURL ?? "" }
+        set { customOpenAIBaseURL = newValue }
+    }
+
+    var configuredCloudflareAccountID: String {
+        get { cloudflareAccountID ?? "" }
+        set { cloudflareAccountID = newValue }
+    }
+
+    var isCloudflareReasoningEnabled: Bool {
+        get { cloudflareReasoningEnabled ?? false }
+        set { cloudflareReasoningEnabled = newValue }
+    }
+
     func model(for provider: Provider) -> String {
         let value = models[provider.id]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return value.isEmpty ? provider.defaultModel : value
@@ -167,8 +192,12 @@ struct CustomAction: Codable, Identifiable, Equatable {
     var providerID = ""
     var model = ""
     var inputMode: InputMode = .transform
+    // Optional keeps custom actions saved by earlier versions decodable.
+    var readsClipboard: Bool?
     var inputLimit = 0
     var outputLimit = 0
+
+    var usesClipboard: Bool { readsClipboard ?? false }
 }
 
 enum BuiltInAction: String, CaseIterable, Identifiable {
@@ -223,10 +252,21 @@ struct ActionRequest: Identifiable, Equatable {
     var systemImage: String? = nil
     var prompt: String
     var inputMode: InputMode
+    var readsClipboard = false
     var providerID = ""
     var model = ""
     var inputLimit = 0
     var outputLimit = 0
+}
+
+struct AIConversationMessage: Equatable {
+    enum Role: String, Equatable {
+        case user
+        case assistant
+    }
+
+    var role: Role
+    var content: String
 }
 
 extension CustomAction {
@@ -235,6 +275,7 @@ extension CustomAction {
             label: name,
             prompt: prompt,
             inputMode: inputMode,
+            readsClipboard: usesClipboard,
             providerID: providerID,
             model: model,
             inputLimit: inputLimit,

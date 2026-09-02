@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 @MainActor
 final class AppState: ObservableObject {
@@ -92,7 +93,10 @@ final class AppState: ObservableObject {
         do {
             try KeychainStore.set(APIKeyDraft, for: settings.provider)
             APIKeyDraft = APIKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-            APIKeyStatus = APIKeyDraft.isEmpty ? "API key removed" : "API key stored securely"
+            let credential = settings.provider == .cloudflare ?
+                "API token" : "API key"
+            APIKeyStatus = APIKeyDraft.isEmpty ?
+                "\(credential) removed" : "\(credential) stored securely"
         } catch {
             APIKeyStatus = error.localizedDescription
         }
@@ -107,9 +111,20 @@ final class AppState: ObservableObject {
     func run(_ action: CustomAction) { run(action.request) }
 
     func run(_ request: ActionRequest) {
-        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sourceText: String
+
+        if request.readsClipboard {
+            sourceText = UIPasteboard.general.string ?? ""
+            input = sourceText
+        } else {
+            sourceText = input
+        }
+
+        let text = sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
-            errorMessage = "Add or paste some text first."
+            errorMessage = request.readsClipboard ?
+                "Copy some text before running this action." :
+                "Add or paste some text first."
             return
         }
         requestTask?.cancel()

@@ -24,7 +24,7 @@ struct ActionsView: View {
                                     Text(action.name)
                                         .font(.headline)
                                         .foregroundStyle(.primary)
-                                    Text(action.inputMode == .prompt ? "Prompt" : "Transform")
+                                    Text(actionSummary(action))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                     if !action.prompt.isEmpty {
@@ -76,14 +76,28 @@ private struct ActionEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Action") {
+                Section {
                     TextField("Name", text: $action.name)
                     Picker("Input mode", selection: $action.inputMode) {
                         Text("Transform selected text").tag(InputMode.transform)
                         Text("Use text as prompt").tag(InputMode.prompt)
                     }
+                    Toggle(
+                        "Read text from clipboard",
+                        isOn: Binding(
+                            get: { action.usesClipboard },
+                            set: { action.readsClipboard = $0 }
+                        )
+                    )
+                    .toggleStyle(MonochromeToggleStyle())
                     Toggle("Show in action list", isOn: $action.enabled)
                         .toggleStyle(MonochromeToggleStyle())
+                } header: {
+                    Text("Action")
+                } footer: {
+                    if action.usesClipboard {
+                        Text("This action uses copied text instead of a selection. In the keyboard, its result is inserted at the cursor, so it also works with text you cannot edit.")
+                    }
                 }
 
                 Section(action.inputMode == .prompt ? "System guidance (optional)" : "Prompt") {
@@ -136,4 +150,9 @@ private struct ActionEditor: View {
             }
         }
     }
+}
+
+private func actionSummary(_ action: CustomAction) -> String {
+    let mode = action.inputMode == .prompt ? "Prompt" : "Transform"
+    return action.usesClipboard ? "\(mode) · Clipboard" : mode
 }

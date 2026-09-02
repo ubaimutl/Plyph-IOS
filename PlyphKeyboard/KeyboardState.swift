@@ -5,6 +5,17 @@ import Foundation
 final class KeyboardState: ObservableObject {
     enum Phase: Equatable { case idle, running, review, error, done }
 
+    struct ConversationMessage: Identifiable, Equatable {
+        enum Role: Equatable {
+            case user
+            case assistant
+        }
+
+        let id = UUID()
+        var role: Role
+        var text: String
+    }
+
     enum Page: Equatable {
         case letters
         case numbers
@@ -36,8 +47,16 @@ final class KeyboardState: ObservableObject {
     @Published var aiContext = ""
     @Published var aiInsertResultMode = false
 
+    @Published var conversationMessages: [ConversationMessage] = []
+    @Published var activeResponseID: UUID?
+    @Published var conversationTitle = ""
+    @Published var markdownPreviewEnabled = false
+    @Published var conversationError = ""
+
     var originalSelection = ""
     var settings = AppSettings()
+    var conversationRequest: ActionRequest?
+    var conversationSourceText = ""
 
     private static let languageStorageKey = "plyph.keyboard.language"
     private var lastShiftTap = Date.distantPast
@@ -54,6 +73,22 @@ final class KeyboardState: ObservableObject {
     var usesUppercaseLetters: Bool {
         guard language.supportsShift else { return false }
         return shiftState != .lowercase
+    }
+
+    var isConversationActive: Bool {
+        !conversationMessages.isEmpty &&
+            (phase == .review || phase == .running)
+    }
+
+    var activeConversationResult: String {
+        guard let activeResponseID,
+              let message = conversationMessages.first(where: {
+                  $0.id == activeResponseID && $0.role == .assistant
+              }) else {
+            return result
+        }
+
+        return message.text
     }
 
     func configureLanguages(_ languages: [KeyboardLanguage]) {
@@ -102,6 +137,98 @@ final class KeyboardState: ObservableObject {
         aiInstruction = ""
         aiContext = ""
         aiInsertResultMode = false
+    }
+
+    func beginConversation(
+        title: String,
+        sourceText: String,
+        request: ActionRequest,
+        initialResult: String,
+        insertsResult: Bool
+    ) {
+        let response = ConversationMessage(
+            role: .assistant,
+            text: initialResult
+        )
+
+        conversationTitle = title
+        conversationSourceText = sourceText
+        conversationRequest = request
+        conversationMessages = [response]
+        activeResponseID = response.id
+        markdownPreviewEnabled = false
+        conversationError = ""
+        aiInsertResultMode = insertsResult
+        aiComposerMode = false
+        aiInstruction = ""
+        result = initialResult
+        phase = .review
+    }
+
+    func beginFollowUpComposer() {
+        guard isConversationActive, !aiComposerMode else { return }
+        conversationError = ""
+        aiComposerMode = true
+        page = .letters
+        if aiInstruction.isEmpty {
+            shiftState = language.supportsShift ? .shifted : .lowercase
+        }
+    }
+
+    func collapseFollowUpComposer(clearDraft: Bool = false) {
+        aiComposerMode = false
+
+        if clearDraft {
+            aiInstruction = ""
+        }
+    }
+
+    func appendFollowUp() -> String? {
+        let instruction = aiInstruction
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !instruction.isEmpty else { return nil }
+
+        conversationMessages.append(
+            ConversationMessage(role: .user, text: instruction)
+        )
+        aiInstruction = ""
+        aiComposerMode = false
+        conversationError = ""
+        return instruction
+    }
+
+    func appendConversationResponse(_ text: String) {
+        let response = ConversationMessage(
+            role: .assistant,
+            text: text
+        )
+
+        conversationMessages.append(response)
+        activeResponseID = response.id
+        result = text
+        conversationError = ""
+        phase = .review
+    }
+
+    func selectConversationResponse(_ id: UUID) {
+        guard let response = conversationMessages.first(where: {
+            $0.id == id && $0.role == .assistant
+        }) else {
+            return
+        }
+
+        activeResponseID = id
+        result = response.text
+    }
+
+    var providerConversationHistory: [AIConversationMessage] {
+        conversationMessages.map { message in
+            AIConversationMessage(
+                role: message.role == .assistant ? .assistant : .user,
+                content: message.text
+            )
+        }
     }
 
     func appendAIInstruction(_ text: String) {
@@ -192,5 +319,12 @@ final class KeyboardState: ObservableObject {
         aiInstruction = ""
         aiContext = ""
         aiInsertResultMode = false
+        conversationMessages = []
+        activeResponseID = nil
+        conversationTitle = ""
+        markdownPreviewEnabled = false
+        conversationError = ""
+        conversationRequest = nil
+        conversationSourceText = ""
     }
 }

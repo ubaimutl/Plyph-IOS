@@ -11,7 +11,7 @@ enum KeychainStore {
     }
 
     static func value(for provider: Provider) -> String {
-        guard provider.requiresAPIKey else { return "" }
+        guard provider.supportsAPIKey else { return "" }
 
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -39,7 +39,7 @@ enum KeychainStore {
     }
 
     static func set(_ value: String, for provider: Provider) throws {
-        guard provider.requiresAPIKey else { return }
+        guard provider.supportsAPIKey else { return }
 
         var base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

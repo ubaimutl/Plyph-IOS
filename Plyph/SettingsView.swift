@@ -52,19 +52,54 @@ struct SettingsView: View {
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
                 } else {
+                    if state.settings.provider == .customOpenAI {
+                        TextField(
+                            "Base URL",
+                            text: settingsBinding(\.configuredCustomOpenAIBaseURL)
+                        )
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+
+                        Text("Use the API base, such as https://api.example.com/v1. Plyph adds /chat/completions and /models.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if state.settings.provider == .cloudflare {
+                        TextField(
+                            "Account ID",
+                            text: settingsBinding(\.configuredCloudflareAccountID)
+                        )
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    }
+
                     HStack {
                         if showAPIKey {
-                            TextField("API key", text: $state.APIKeyDraft)
+                            TextField(apiCredentialLabel, text: $state.APIKeyDraft)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                         } else {
-                            SecureField("API key", text: $state.APIKeyDraft)
+                            SecureField(apiCredentialLabel, text: $state.APIKeyDraft)
                         }
                         Button(showAPIKey ? "Hide" : "Show") { showAPIKey.toggle() }
                     }
-                    Button("Save API key") { state.saveAPIKey() }
+                    Button(saveCredentialLabel) { state.saveAPIKey() }
                     if !state.APIKeyStatus.isEmpty {
                         Text(state.APIKeyStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if state.settings.provider == .cloudflare {
+                        Toggle(
+                            "Enable Qwen reasoning",
+                            isOn: settingsBinding(\.isCloudflareReasoningEnabled)
+                        )
+                        .toggleStyle(MonochromeToggleStyle())
+
+                        Text("Applies to Cloudflare Qwen 3 models. It is off by default because reasoning uses part of the response limit.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -151,6 +186,22 @@ struct SettingsView: View {
         state.settings.enabledKeyboardLanguages
             .map(\.shortCode)
             .joined(separator: ", ")
+    }
+
+    private var apiCredentialLabel: String {
+        switch state.settings.provider {
+        case .cloudflare:
+            return "API token"
+        case .customOpenAI:
+            return "API key (optional)"
+        default:
+            return "API key"
+        }
+    }
+
+    private var saveCredentialLabel: String {
+        state.settings.provider == .cloudflare ?
+            "Save API token" : "Save API key"
     }
 
     private var filteredModels: [String] {

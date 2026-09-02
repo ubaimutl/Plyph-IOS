@@ -62,6 +62,11 @@ enum KeyboardMetrics {
 
     static let reviewHeight: CGFloat = max(300, normalHeight)
     static let errorHeight: CGFloat = normalHeight + 10
+    static let conversationHeight: CGFloat = max(
+        320,
+        normalHeight + 40
+    )
+    static let conversationTypingHeight: CGFloat = normalHeight + 180
 
     static let actionBarHeight: CGFloat = 38
     static let keyCornerRadius: CGFloat = 5

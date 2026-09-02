@@ -8,35 +8,116 @@ struct AIClient {
     }
 
     func transform(text: String, request: ActionRequest, settings: AppSettings) async throws -> String {
-        let estimatedTokens = (text.count + 3) / 4
+        let initialMessage = AIConversationMessage(
+            role: .user,
+            content: request.inputMode == .prompt ? text : payload(text)
+        )
+
+        return try await generate(
+            sourceText: text,
+            messages: [initialMessage],
+            request: request,
+            settings: settings,
+            isFollowUp: false
+        )
+    }
+
+    func continueConversation(
+        sourceText: String,
+        history: [AIConversationMessage],
+        request: ActionRequest,
+        settings: AppSettings
+    ) async throws -> String {
+        let initialMessage = AIConversationMessage(
+            role: .user,
+            content: request.inputMode == .prompt ?
+                sourceText : payload(sourceText)
+        )
+
+        return try await generate(
+            sourceText: sourceText,
+            messages: [initialMessage] + history,
+            request: request,
+            settings: settings,
+            isFollowUp: true
+        )
+    }
+
+    private func generate(
+        sourceText: String,
+        messages: [AIConversationMessage],
+        request: ActionRequest,
+        settings: AppSettings,
+        isFollowUp: Bool
+    ) async throws -> String {
+        let inputCharacterCount = messages.reduce(0) {
+            $0 + $1.content.count
+        }
+        let estimatedTokens = (inputCharacterCount + 3) / 4
+
         if request.inputLimit > 0, estimatedTokens > request.inputLimit {
-            throw AIError.message("Selected text is about \(estimatedTokens) tokens, above this action's \(request.inputLimit)-token input limit.")
+            throw AIError.message(
+                "This conversation is about \(estimatedTokens) tokens, above this action's \(request.inputLimit)-token input limit."
+            )
         }
 
         let provider = Provider(rawValue: request.providerID).map { $0 } ?? settings.provider
         let model = request.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? settings.model(for: provider)
             : request.model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !model.isEmpty else { throw AIError.message("Choose a model in Settings first.") }
+        guard !model.isEmpty else {
+            throw AIError.message(
+                provider == .customOpenAI ?
+                    "Enter a model ID for the custom provider in Settings." :
+                    "Choose a model in Settings first."
+            )
+        }
 
-        let prompt = expand(request.prompt, selection: text, settings: settings)
-        let outputLimit = request.inputMode == .prompt && request.outputLimit == 0 ? 2_000 : request.outputLimit
+        var prompt = expand(
+            request.prompt,
+            selection: sourceText,
+            settings: settings
+        )
+
+        if isFollowUp {
+            prompt += followUpGuidance(for: request.inputMode)
+        }
+
+        var outputLimit = request.inputMode == .prompt && request.outputLimit == 0 ? 2_000 : request.outputLimit
+        let inputText = messages.map(\.content).joined(separator: "\n")
+
+        let cloudflareReasoningModel = isCloudflareQwenReasoningModel(
+            provider: provider,
+            model: model
+        )
+        let cloudflareReasoningEnabled = cloudflareReasoningModel &&
+            settings.isCloudflareReasoningEnabled
+
+        if cloudflareReasoningEnabled, request.outputLimit == 0 {
+            outputLimit = max(outputLimit, 4_096)
+        }
 
         switch provider {
         case .ollama:
-            return try await ollama(text: text, prompt: prompt, model: model, mode: request.inputMode, outputLimit: outputLimit, settings: settings)
+            return try await ollama(messages: messages, prompt: prompt, model: model, mode: request.inputMode, outputLimit: outputLimit, settings: settings)
         case .gemini:
-            return try await gemini(text: text, prompt: prompt, model: model, mode: request.inputMode, outputLimit: outputLimit)
+            return try await gemini(messages: messages, prompt: prompt, model: model, mode: request.inputMode, outputLimit: outputLimit)
+        case .cloudflare:
+            let accountID = try cloudflareAccountID(settings)
+            let endpoint = "https://api.cloudflare.com/client/v4/accounts/\(urlEncode(accountID))/ai/v1/chat/completions"
+            return try await openAICompatible(provider: provider, endpoint: endpoint, inputText: inputText, messages: messages, prompt: prompt, model: model, mode: request.inputMode, outputLimit: outputLimit, extraHeaders: ["cf-aig-gateway-id": "default"], cloudflareReasoningEnabled: cloudflareReasoningEnabled)
         case .groq:
-            return try await openAICompatible(provider: provider, endpoint: "https://api.groq.com/openai/v1/chat/completions", text: text, prompt: prompt, model: model, mode: request.inputMode, outputLimit: outputLimit)
+            return try await openAICompatible(provider: provider, endpoint: "https://api.groq.com/openai/v1/chat/completions", inputText: inputText, messages: messages, prompt: prompt, model: model, mode: request.inputMode, outputLimit: outputLimit)
         case .openrouter:
-            return try await openAICompatible(provider: provider, endpoint: "https://openrouter.ai/api/v1/chat/completions", text: text, prompt: prompt, model: model, mode: request.inputMode, outputLimit: outputLimit, extraHeaders: ["X-Title": "Plyph"])
+            return try await openAICompatible(provider: provider, endpoint: "https://openrouter.ai/api/v1/chat/completions", inputText: inputText, messages: messages, prompt: prompt, model: model, mode: request.inputMode, outputLimit: outputLimit, extraHeaders: ["X-Title": "Plyph"])
         case .cerebras:
-            return try await openAICompatible(provider: provider, endpoint: "https://api.cerebras.ai/v1/chat/completions", text: text, prompt: prompt, model: model, mode: request.inputMode, outputLimit: outputLimit, completionTokenKey: "max_completion_tokens")
+            return try await openAICompatible(provider: provider, endpoint: "https://api.cerebras.ai/v1/chat/completions", inputText: inputText, messages: messages, prompt: prompt, model: model, mode: request.inputMode, outputLimit: outputLimit, completionTokenKey: "max_completion_tokens")
         case .openai:
-            return try await openAICompatible(provider: provider, endpoint: "https://api.openai.com/v1/chat/completions", text: text, prompt: prompt, model: model, mode: request.inputMode, outputLimit: outputLimit)
+            return try await openAICompatible(provider: provider, endpoint: "https://api.openai.com/v1/chat/completions", inputText: inputText, messages: messages, prompt: prompt, model: model, mode: request.inputMode, outputLimit: outputLimit)
         case .vercel:
-            return try await openAICompatible(provider: provider, endpoint: "https://ai-gateway.vercel.sh/v1/chat/completions", text: text, prompt: prompt, model: model, mode: request.inputMode, outputLimit: outputLimit)
+            return try await openAICompatible(provider: provider, endpoint: "https://ai-gateway.vercel.sh/v1/chat/completions", inputText: inputText, messages: messages, prompt: prompt, model: model, mode: request.inputMode, outputLimit: outputLimit)
+        case .customOpenAI:
+            return try await openAICompatible(provider: provider, endpoint: try customOpenAIEndpoint(settings, path: "chat/completions"), inputText: inputText, messages: messages, prompt: prompt, model: model, mode: request.inputMode, outputLimit: outputLimit)
         }
     }
 
@@ -48,6 +129,20 @@ struct AIClient {
         case .gemini:
             let key = try requiredKey(provider)
             request = try makeRequest(url: "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&key=\(urlEncode(key))")
+        case .cloudflare:
+            let accountID = try cloudflareAccountID(settings)
+            request = try makeRequest(
+                url: "https://api.cloudflare.com/client/v4/accounts/\(urlEncode(accountID))/ai/models/search?task=Text%20Generation&hide_experimental=true&per_page=100",
+                headers: ["Authorization": "Bearer \(try requiredKey(provider))"]
+            )
+        case .customOpenAI:
+            var headers: [String: String] = [:]
+            let key = KeychainStore.value(for: provider)
+            if !key.isEmpty { headers["Authorization"] = "Bearer \(key)" }
+            request = try makeRequest(
+                url: try customOpenAIEndpoint(settings, path: "models"),
+                headers: headers
+            )
         default:
             let endpoints: [Provider: String] = [
                 .groq: "https://api.groq.com/openai/v1/models",
@@ -68,38 +163,66 @@ struct AIClient {
                       let name = item["name"] as? String else { return nil }
                 return name.replacingOccurrences(of: "models/", with: "")
             }
+        } else if provider == .cloudflare {
+            values = (object["result"] as? [[String: Any]] ?? []).compactMap {
+                ($0["name"] ?? $0["id"]) as? String
+            }
         } else {
-            values = (object["data"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
+            values = (object["data"] as? [[String: Any]] ?? []).compactMap {
+                ($0["id"] ?? $0["name"]) as? String
+            }
         }
         return Array(Set(values)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
-    private func openAICompatible(provider: Provider, endpoint: String, text: String, prompt: String, model: String, mode: InputMode, outputLimit: Int, extraHeaders: [String: String] = [:], completionTokenKey: String = "max_tokens") async throws -> String {
+    private func openAICompatible(provider: Provider, endpoint: String, inputText: String, messages: [AIConversationMessage], prompt: String, model: String, mode: InputMode, outputLimit: Int, extraHeaders: [String: String] = [:], completionTokenKey: String = "max_tokens", cloudflareReasoningEnabled: Bool = false) async throws -> String {
         var body: [String: Any] = [
             "model": model,
-            "messages": messages(prompt: prompt, text: text, mode: mode),
-            completionTokenKey: maxTokens(text: text, outputLimit: outputLimit)
+            "messages": providerMessages(prompt: prompt, messages: messages),
+            completionTokenKey: maxTokens(text: inputText, outputLimit: outputLimit)
         ]
         if provider == .groq, model.hasPrefix("openai/gpt-oss-") {
             body["reasoning_effort"] = "low"
             body["include_reasoning"] = false
         }
+        let cloudflareReasoningModel = isCloudflareQwenReasoningModel(
+            provider: provider,
+            model: model
+        )
+        if cloudflareReasoningModel {
+            body["chat_template_kwargs"] = [
+                "enable_thinking": cloudflareReasoningEnabled
+            ]
+        }
         var headers = extraHeaders
-        headers["Authorization"] = "Bearer \(try requiredKey(provider))"
+        let key = provider.requiresAPIKey ?
+            try requiredKey(provider) : KeychainStore.value(for: provider)
+        if !key.isEmpty { headers["Authorization"] = "Bearer \(key)" }
         let request = try makeRequest(url: endpoint, method: "POST", headers: headers, body: body)
         let object = try await send(request, provider: provider)
         guard let choices = object["choices"] as? [[String: Any]], let first = choices.first else {
             throw AIError.message("\(provider.displayName) returned an invalid response.")
         }
         if first["finish_reason"] as? String == "length" { throw AIError.outputLimit }
-        guard let message = first["message"] as? [String: Any], let output = message["content"] as? String else {
+        guard let message = first["message"] as? [String: Any] else {
             throw AIError.message("\(provider.displayName) returned an invalid response.")
+        }
+        let content = message["content"] as? String ?? ""
+        let reasoningFallback = !cloudflareReasoningEnabled && cloudflareReasoningModel ?
+            ((message["reasoning_content"] ?? message["reasoning"]) as? String ?? "") : ""
+        let output = content.isEmpty ? reasoningFallback : content
+        guard !output.isEmpty else {
+            throw AIError.message("\(provider.displayName) returned an empty response.")
         }
         return clean(output, mode: mode)
     }
 
-    private func ollama(text: String, prompt: String, model: String, mode: InputMode, outputLimit: Int, settings: AppSettings) async throws -> String {
-        var body: [String: Any] = ["model": model, "messages": messages(prompt: prompt, text: text, mode: mode), "stream": false]
+    private func ollama(messages: [AIConversationMessage], prompt: String, model: String, mode: InputMode, outputLimit: Int, settings: AppSettings) async throws -> String {
+        var body: [String: Any] = [
+            "model": model,
+            "messages": providerMessages(prompt: prompt, messages: messages),
+            "stream": false
+        ]
         if outputLimit > 0 { body["options"] = ["num_predict": outputLimit] }
         let endpoint = settings.ollamaURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/api/chat"
         let object = try await send(try makeRequest(url: endpoint, method: "POST", body: body), provider: .ollama)
@@ -110,11 +233,22 @@ struct AIClient {
         return clean(output, mode: mode)
     }
 
-    private func gemini(text: String, prompt: String, model: String, mode: InputMode, outputLimit: Int) async throws -> String {
+    private func gemini(messages: [AIConversationMessage], prompt: String, model: String, mode: InputMode, outputLimit: Int) async throws -> String {
         let key = try requiredKey(.gemini)
+        let contents: [[String: Any]] = messages.map { message in
+            [
+                "role": message.role == .assistant ? "model" : "user",
+                "parts": [["text": message.content]]
+            ]
+        }
         var body: [String: Any] = [
-            "contents": [["role": "user", "parts": [["text": mode == .prompt ? text : payload(text)]]]],
-            "generationConfig": ["maxOutputTokens": maxTokens(text: text, outputLimit: outputLimit)]
+            "contents": contents,
+            "generationConfig": [
+                "maxOutputTokens": maxTokens(
+                    text: messages.map(\.content).joined(separator: "\n"),
+                    outputLimit: outputLimit
+                )
+            ]
         ]
         if !prompt.isEmpty { body["systemInstruction"] = ["parts": [["text": prompt]]] }
         let endpoint = "https://generativelanguage.googleapis.com/v1beta/models/\(urlEncode(model)):generateContent?key=\(urlEncode(key))"
@@ -137,8 +271,18 @@ struct AIClient {
             let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
             guard (200...299).contains(http.statusCode) else {
                 switch http.statusCode {
-                case 401, 403: throw AIError.message("\(provider.displayName) rejected the API key.")
-                case 404: throw AIError.message("\(provider.displayName) could not find that model.")
+                case 401, 403:
+                    throw AIError.message(
+                        provider == .cloudflare ?
+                            "Cloudflare rejected the API token or Account ID." :
+                            "\(provider.displayName) rejected the API key."
+                    )
+                case 404:
+                    throw AIError.message(
+                        provider == .cloudflare ?
+                            "Cloudflare could not find that account or model." :
+                            "\(provider.displayName) could not find that model."
+                    )
                 case 429: throw AIError.message("\(provider.displayName) rate limit reached. Wait and try again.")
                 case 500...599: throw AIError.message("\(provider.displayName) is temporarily unavailable (\(http.statusCode)).")
                 default: throw AIError.message("\(provider.displayName) rejected the request (\(http.statusCode)).")
@@ -167,11 +311,33 @@ struct AIClient {
         return request
     }
 
-    private func messages(prompt: String, text: String, mode: InputMode) -> [[String: String]] {
+    private func providerMessages(
+        prompt: String,
+        messages: [AIConversationMessage]
+    ) -> [[String: String]] {
         var result: [[String: String]] = []
         if !prompt.isEmpty { result.append(["role": "system", "content": prompt]) }
-        result.append(["role": "user", "content": mode == .prompt ? text : payload(text)])
+        result += messages.map {
+            ["role": $0.role.rawValue, "content": $0.content]
+        }
         return result
+    }
+
+    private func followUpGuidance(for mode: InputMode) -> String {
+        switch mode {
+        case .transform:
+            return """
+
+
+            Continue refining the original text using the user's follow-up instructions and the prior versions as context. Return only the complete updated text with no commentary. Do not use Markdown unless the user explicitly requests it.
+            """
+        case .prompt:
+            return """
+
+
+            Continue the conversation using the prior messages as context. Respond directly to the user's latest message.
+            """
+        }
     }
 
     private func payload(_ text: String) -> String {
@@ -203,9 +369,56 @@ struct AIClient {
         outputLimit > 0 ? outputLimit : min(max((text.count + 3) / 4 + 180, 220), 2_000)
     }
 
+    private func customOpenAIEndpoint(
+        _ settings: AppSettings,
+        path: String
+    ) throws -> String {
+        var base = settings.configuredCustomOpenAIBaseURL
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !base.isEmpty else {
+            throw AIError.message("Enter the custom provider Base URL in Settings.")
+        }
+
+        while base.hasSuffix("/") { base.removeLast() }
+        if base.hasSuffix("/chat/completions") {
+            base.removeLast("/chat/completions".count)
+        }
+
+        return "\(base)/\(path)"
+    }
+
+    private func cloudflareAccountID(_ settings: AppSettings) throws -> String {
+        let value = settings.configuredCloudflareAccountID
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !value.isEmpty else {
+            throw AIError.message("Add your Cloudflare Account ID in Settings.")
+        }
+
+        return value
+    }
+
+    private func isCloudflareQwenReasoningModel(
+        provider: Provider,
+        model: String
+    ) -> Bool {
+        guard provider == .cloudflare else { return false }
+        return model.range(
+            of: #"^@cf/qwen/qwen3(?:[.-]|$)"#,
+            options: .regularExpression
+        ) != nil
+    }
+
     private func requiredKey(_ provider: Provider) throws -> String {
         let value = KeychainStore.value(for: provider)
-        guard !value.isEmpty else { throw AIError.message("Add a \(provider.displayName) API key in Settings.") }
+        guard !value.isEmpty else {
+            throw AIError.message(
+                provider == .cloudflare ?
+                    "Add a Cloudflare Workers AI API token in Settings." :
+                    "Add a \(provider.displayName) API key in Settings."
+            )
+        }
         return value
     }
 
