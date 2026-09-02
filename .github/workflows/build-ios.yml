@@ -1,0 +1,44 @@
+name: Build Plyph iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Plyph IPA
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build IPA
+        run: ./scripts/build-ipa.sh
+
+      - name: Add installation notes
+        run: |
+          echo "### Plyph iOS build" >> "$GITHUB_STEP_SUMMARY"
+          echo "Download the **Plyph-iOS** artifact and extract **Plyph.ipa**." >> "$GITHUB_STEP_SUMMARY"
+          echo "Import the IPA into SideStore or AltStore. Keep the keyboard extension when signing." >> "$GITHUB_STEP_SUMMARY"
+          echo "In SideStore, enable the option to reuse the main app profile for extensions to use one App ID." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Plyph-iOS
+          path: |
+            build/Plyph.ipa
+            build/Plyph.ipa.sha256
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

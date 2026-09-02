@@ -1,0 +1,16 @@
+.DS_Store
+build/
+DerivedData/
+Plyph.xcodeproj/
+*.xcuserstate
+xcuserdata/
+
+.env
+.env.*
+!.env.example
+
+*.ipa
+*.xcarchive/
+*.mobileprovision
+*.p12
+*.pem
