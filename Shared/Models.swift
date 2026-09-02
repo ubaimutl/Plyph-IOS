@@ -148,6 +148,7 @@ struct AppSettings: Codable, Equatable {
     var runInputLimit = 0
     var runOutputLimit = 0
     var reviewBeforeKeyboardReplacement = true
+    var conversationalReviewEnabled: Bool?
     var language = "English"
     var tone = "professional"
     var style = "clear and concise"
@@ -178,6 +179,11 @@ struct AppSettings: Codable, Equatable {
         set { cloudflareReasoningEnabled = newValue }
     }
 
+    var isConversationalReviewEnabled: Bool {
+        get { conversationalReviewEnabled ?? false }
+        set { conversationalReviewEnabled = newValue }
+    }
+
     func model(for provider: Provider) -> String {
         let value = models[provider.id]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return value.isEmpty ? provider.defaultModel : value
@@ -194,10 +200,12 @@ struct CustomAction: Codable, Identifiable, Equatable {
     var inputMode: InputMode = .transform
     // Optional keeps custom actions saved by earlier versions decodable.
     var readsClipboard: Bool?
+    var plainTextOutput: Bool?
     var inputLimit = 0
     var outputLimit = 0
 
     var usesClipboard: Bool { readsClipboard ?? false }
+    var usesPlainTextOutput: Bool { plainTextOutput ?? true }
 }
 
 enum BuiltInAction: String, CaseIterable, Identifiable {
@@ -222,14 +230,16 @@ enum BuiltInAction: String, CaseIterable, Identifiable {
                 label: rawValue,
                 systemImage: systemImage,
                 prompt: settings.promptCorrect,
-                inputMode: .transform
+                inputMode: .transform,
+                plainTextOutput: true
             )
         case .rewrite:
             ActionRequest(
                 label: rawValue,
                 systemImage: systemImage,
                 prompt: settings.promptRewrite,
-                inputMode: .transform
+                inputMode: .transform,
+                plainTextOutput: true
             )
         case .runPrompt:
             ActionRequest(
@@ -253,6 +263,7 @@ struct ActionRequest: Identifiable, Equatable {
     var prompt: String
     var inputMode: InputMode
     var readsClipboard = false
+    var plainTextOutput = false
     var providerID = ""
     var model = ""
     var inputLimit = 0
@@ -276,6 +287,7 @@ extension CustomAction {
             prompt: prompt,
             inputMode: inputMode,
             readsClipboard: usesClipboard,
+            plainTextOutput: usesPlainTextOutput,
             providerID: providerID,
             model: model,
             inputLimit: inputLimit,

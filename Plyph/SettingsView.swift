@@ -21,6 +21,13 @@ struct SettingsView: View {
                 )
                 .toggleStyle(MonochromeToggleStyle())
 
+                Toggle(
+                    "Conversational follow-ups",
+                    isOn: settingsBinding(\.isConversationalReviewEnabled)
+                )
+                .toggleStyle(MonochromeToggleStyle())
+                .disabled(!state.settings.reviewBeforeKeyboardReplacement)
+
                 NavigationLink {
                     KeyboardLanguagesView()
                 } label: {
@@ -34,7 +41,13 @@ struct SettingsView: View {
             } header: {
                 Text("Keyboard integration")
             } footer: {
-                Text("In Settings, go to General › Keyboard › Keyboards › Add New Keyboard, choose Plyph, then enable Allow Full Access. Full Access is required only so an action can contact your chosen provider and read settings stored by this app.")
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("In Settings, go to General › Keyboard › Keyboards › Add New Keyboard, choose Plyph, then enable Allow Full Access. Full Access is required only so an action can contact your chosen provider and read settings stored by this app.")
+
+                    if state.settings.isConversationalReviewEnabled {
+                        Text("Conversational follow-ups resend the original text and previous responses with each request. Longer conversations can use significantly more input tokens.")
+                    }
+                }
             }
 
             Section("AI provider") {

@@ -106,6 +106,21 @@ private struct ActionEditor: View {
                 }
 
                 Section {
+                    Toggle(
+                        "Remove Markdown formatting",
+                        isOn: Binding(
+                            get: { action.usesPlainTextOutput },
+                            set: { action.plainTextOutput = $0 }
+                        )
+                    )
+                    .toggleStyle(MonochromeToggleStyle())
+                } header: {
+                    Text("Output")
+                } footer: {
+                    Text("Enabled by default. Plyph requests plain text and also removes Markdown syntax while preserving line breaks and spacing.")
+                }
+
+                Section {
                     Picker("Provider", selection: $action.providerID) {
                         Text("Use active provider").tag("")
                         ForEach(Provider.allCases) { provider in

@@ -13,13 +13,16 @@ struct AIClient {
             content: request.inputMode == .prompt ? text : payload(text)
         )
 
-        return try await generate(
+        let output = try await generate(
             sourceText: text,
             messages: [initialMessage],
             request: request,
             settings: settings,
             isFollowUp: false
         )
+
+        return request.plainTextOutput ?
+            MarkdownPlainTextConverter.convert(output) : output
     }
 
     func continueConversation(
@@ -34,13 +37,16 @@ struct AIClient {
                 sourceText : payload(sourceText)
         )
 
-        return try await generate(
+        let output = try await generate(
             sourceText: sourceText,
             messages: [initialMessage] + history,
             request: request,
             settings: settings,
             isFollowUp: true
         )
+
+        return request.plainTextOutput ?
+            MarkdownPlainTextConverter.convert(output) : output
     }
 
     private func generate(
@@ -78,6 +84,14 @@ struct AIClient {
             selection: sourceText,
             settings: settings
         )
+
+        if request.plainTextOutput {
+            prompt += """
+
+
+            Output format requirement: Return plain text only. Do not use Markdown syntax, tables, headings, emphasis markers, backticks, or fenced code blocks. Preserve useful line breaks and list structure.
+            """
+        }
 
         if isFollowUp {
             prompt += followUpGuidance(for: request.inputMode)
@@ -424,6 +438,144 @@ struct AIClient {
 
     private func urlEncode(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
+    }
+}
+
+enum MarkdownPlainTextConverter {
+    static func convert(_ markdown: String) -> String {
+        let normalized = markdown
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let lines = normalized.components(separatedBy: "\n")
+        let separatorIndexes = Set(
+            lines.indices.filter { isTableSeparator(lines[$0]) }
+        )
+        var tableRows = Set<Int>()
+
+        for separatorIndex in separatorIndexes {
+            let headerIndex = separatorIndex - 1
+            if lines.indices.contains(headerIndex),
+               lines[headerIndex].contains("|") {
+                tableRows.insert(headerIndex)
+            }
+
+            var rowIndex = separatorIndex + 1
+            while lines.indices.contains(rowIndex),
+                  !lines[rowIndex].isEmpty,
+                  lines[rowIndex].contains("|") {
+                tableRows.insert(rowIndex)
+                rowIndex += 1
+            }
+        }
+
+        var insideFence = false
+        var output: [String] = []
+
+        for index in lines.indices {
+            let line = lines[index]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                insideFence.toggle()
+                continue
+            }
+
+            if separatorIndexes.contains(index) {
+                continue
+            }
+
+            if tableRows.contains(index) {
+                output.append(plainTableRow(line))
+                continue
+            }
+
+            if insideFence {
+                output.append(line)
+                continue
+            }
+
+            var plain = line
+            plain = replace(
+                #"^(\s{0,3})#{1,6}\s+"#,
+                in: plain,
+                with: "$1"
+            )
+            plain = replace(
+                #"^(\s{0,3})>\s?"#,
+                in: plain,
+                with: "$1"
+            )
+            plain = replace(
+                #"^(\s*)[-+*]\s+"#,
+                in: plain,
+                with: "$1• "
+            )
+
+            if plain.range(
+                of: #"^\s*(?:-{3,}|\*{3,}|_{3,})\s*$"#,
+                options: .regularExpression
+            ) != nil {
+                output.append("")
+            } else {
+                output.append(removeInlineSyntax(from: plain))
+            }
+        }
+
+        var result = output.joined(separator: "\n")
+        while result.hasPrefix("\n") { result.removeFirst() }
+        while result.hasSuffix("\n") { result.removeLast() }
+        return result
+    }
+
+    private static func isTableSeparator(_ line: String) -> Bool {
+        line.range(
+            of: #"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private static func plainTableRow(_ line: String) -> String {
+        var cells = line.components(separatedBy: "|")
+        if cells.first?.trimmingCharacters(in: .whitespaces).isEmpty == true {
+            cells.removeFirst()
+        }
+        if cells.last?.trimmingCharacters(in: .whitespaces).isEmpty == true {
+            cells.removeLast()
+        }
+
+        return cells
+            .map {
+                removeInlineSyntax(
+                    from: $0.trimmingCharacters(in: .whitespaces)
+                )
+            }
+            .joined(separator: "  ")
+    }
+
+    private static func removeInlineSyntax(from value: String) -> String {
+        var result = value
+        result = replace(#"!\[([^\]]*)\]\([^\)]*\)"#, in: result, with: "$1")
+        result = replace(#"\[([^\]]+)\]\([^\)]*\)"#, in: result, with: "$1")
+        result = replace(#"`([^`\n]+)`"#, in: result, with: "$1")
+        result = replace(#"\*\*([^*\n]+)\*\*"#, in: result, with: "$1")
+        result = replace(#"__([^_\n]+)__"#, in: result, with: "$1")
+        result = replace(#"~~([^~\n]+)~~"#, in: result, with: "$1")
+        result = replace(#"(?<!\*)\*([^*\n]+)\*(?!\*)"#, in: result, with: "$1")
+        result = replace(#"(?<![A-Za-z0-9_])_([^_\n]+)_(?![A-Za-z0-9_])"#, in: result, with: "$1")
+        result = replace(#"\\([\\`*_{}\[\]()#+\-.!|>~])"#, in: result, with: "$1")
+        return result
+    }
+
+    private static func replace(
+        _ pattern: String,
+        in value: String,
+        with replacement: String
+    ) -> String {
+        value.replacingOccurrences(
+            of: pattern,
+            with: replacement,
+            options: .regularExpression
+        )
     }
 }
 

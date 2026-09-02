@@ -50,7 +50,7 @@ final class KeyboardState: ObservableObject {
     @Published var conversationMessages: [ConversationMessage] = []
     @Published var activeResponseID: UUID?
     @Published var conversationTitle = ""
-    @Published var markdownPreviewEnabled = false
+    @Published var plainTextPreviewEnabled = false
     @Published var conversationError = ""
 
     var originalSelection = ""
@@ -88,7 +88,8 @@ final class KeyboardState: ObservableObject {
             return result
         }
 
-        return message.text
+        return plainTextPreviewEnabled ?
+            MarkdownPlainTextConverter.convert(message.text) : message.text
     }
 
     func configureLanguages(_ languages: [KeyboardLanguage]) {
@@ -156,7 +157,7 @@ final class KeyboardState: ObservableObject {
         conversationRequest = request
         conversationMessages = [response]
         activeResponseID = response.id
-        markdownPreviewEnabled = false
+        plainTextPreviewEnabled = false
         conversationError = ""
         aiInsertResultMode = insertsResult
         aiComposerMode = false
@@ -322,7 +323,7 @@ final class KeyboardState: ObservableObject {
         conversationMessages = []
         activeResponseID = nil
         conversationTitle = ""
-        markdownPreviewEnabled = false
+        plainTextPreviewEnabled = false
         conversationError = ""
         conversationRequest = nil
         conversationSourceText = ""

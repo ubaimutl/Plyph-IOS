@@ -15,7 +15,7 @@ struct KeyboardRootView: View {
     let onSendFollowUp: () -> Void
     let onCollapseFollowUp: () -> Void
     let onSelectResponse: (UUID) -> Void
-    let onToggleMarkdown: () -> Void
+    let onTogglePlainText: () -> Void
     let onCursorMove: (Int) -> Void
     let onKey: (KeyboardKeyAction) -> Void
 
@@ -366,14 +366,8 @@ struct KeyboardRootView: View {
 
     @ViewBuilder
     private func responseText(_ value: String) -> some View {
-        if state.markdownPreviewEnabled,
-           let attributed = try? AttributedString(
-                markdown: value,
-                options: AttributedString.MarkdownParsingOptions(
-                    interpretedSyntax: .inlineOnlyPreservingWhitespace
-                )
-           ) {
-            Text(attributed)
+        if state.plainTextPreviewEnabled {
+            Text(MarkdownPlainTextConverter.convert(value))
         } else {
             Text(value)
         }
@@ -450,14 +444,16 @@ struct KeyboardRootView: View {
 
     private var conversationControls: some View {
         HStack(spacing: 5) {
-            Button(action: onToggleMarkdown) {
-                Label("Markdown", systemImage: "textformat")
-            }
-            .buttonStyle(
-                ConversationToolbarButtonStyle(
-                    isSelected: state.markdownPreviewEnabled
+            if state.conversationRequest?.plainTextOutput == false {
+                Button(action: onTogglePlainText) {
+                    Label("Plain text", systemImage: "textformat")
+                }
+                .buttonStyle(
+                    ConversationToolbarButtonStyle(
+                        isSelected: state.plainTextPreviewEnabled
+                    )
                 )
-            )
+            }
 
             Spacer(minLength: 2)
 

@@ -6,6 +6,7 @@ final class PlyphTests: XCTestCase {
         let request = BuiltInAction.correct.request(settings: AppSettings())
         XCTAssertEqual(request.label, "Correct")
         XCTAssertEqual(request.inputMode, .transform)
+        XCTAssertTrue(request.plainTextOutput)
     }
 
     func testRunPromptCarriesOverrides() {
@@ -21,6 +22,7 @@ final class PlyphTests: XCTestCase {
         XCTAssertEqual(request.model, "example-model")
         XCTAssertEqual(request.inputLimit, 100)
         XCTAssertEqual(request.outputLimit, 200)
+        XCTAssertFalse(request.plainTextOutput)
     }
 
     func testProviderDefaultsAreNotEmpty() {
@@ -53,6 +55,7 @@ final class PlyphTests: XCTestCase {
         object.removeValue(forKey: "customOpenAIBaseURL")
         object.removeValue(forKey: "cloudflareAccountID")
         object.removeValue(forKey: "cloudflareReasoningEnabled")
+        object.removeValue(forKey: "conversationalReviewEnabled")
 
         let olderData = try JSONSerialization.data(withJSONObject: object)
         let decoded = try JSONDecoder().decode(
@@ -63,6 +66,7 @@ final class PlyphTests: XCTestCase {
         XCTAssertEqual(decoded.configuredCustomOpenAIBaseURL, "")
         XCTAssertEqual(decoded.configuredCloudflareAccountID, "")
         XCTAssertFalse(decoded.isCloudflareReasoningEnabled)
+        XCTAssertFalse(decoded.isConversationalReviewEnabled)
     }
 
     func testCustomActionCarriesClipboardInputSetting() {
@@ -71,6 +75,7 @@ final class PlyphTests: XCTestCase {
 
         XCTAssertTrue(action.usesClipboard)
         XCTAssertTrue(action.request.readsClipboard)
+        XCTAssertTrue(action.request.plainTextOutput)
     }
 
     func testOlderCustomActionWithoutClipboardSettingStillDecodes() throws {
@@ -94,5 +99,68 @@ final class PlyphTests: XCTestCase {
 
         XCTAssertFalse(action.usesClipboard)
         XCTAssertFalse(action.request.readsClipboard)
+        XCTAssertTrue(action.usesPlainTextOutput)
+        XCTAssertTrue(action.request.plainTextOutput)
+    }
+
+    func testCustomActionCanKeepMarkdownOutput() {
+        var action = CustomAction(name: "Markdown")
+        action.plainTextOutput = false
+
+        XCTAssertFalse(action.usesPlainTextOutput)
+        XCTAssertFalse(action.request.plainTextOutput)
+    }
+
+    func testMarkdownConversionPreservesLayoutAndCleansTable() {
+        let markdown = """
+        Here are **two** ideas:
+
+        | # | Name |
+        |---|------|
+        | 1 | **Hhdf Studios** |
+        | 2 | [Hhdf Labs](https://example.com) |
+
+        ## Notes
+        - First  item
+        - Second item
+        """
+
+        XCTAssertEqual(
+            MarkdownPlainTextConverter.convert(markdown),
+            """
+            Here are two ideas:
+
+            #  Name
+            1  Hhdf Studios
+            2  Hhdf Labs
+
+            Notes
+            • First  item
+            • Second item
+            """
+        )
+    }
+
+    func testMarkdownConversionKeepsCodeAndBlankLines() {
+        let markdown = """
+        Before
+
+        ```swift
+        let value = 1
+        ```
+
+        After  text
+        """
+
+        XCTAssertEqual(
+            MarkdownPlainTextConverter.convert(markdown),
+            """
+            Before
+
+            let value = 1
+
+            After  text
+            """
+        )
     }
 }

@@ -62,8 +62,8 @@ final class KeyboardViewController: UIInputViewController {
             onSelectResponse: { [weak self] id in
                 self?.state.selectConversationResponse(id)
             },
-            onToggleMarkdown: { [weak self] in
-                self?.state.markdownPreviewEnabled.toggle()
+            onTogglePlainText: { [weak self] in
+                self?.state.plainTextPreviewEnabled.toggle()
             },
             onCursorMove: { [weak self] movement in
                 self?.moveCursor(movement)
@@ -375,6 +375,7 @@ final class KeyboardViewController: UIInputViewController {
             label: "Ask",
             prompt: "Use the provided context and the user's instruction to produce the requested response. If the user is asking how to reply, write a natural reply in the appropriate language. Return only the text that should be inserted, unless the user explicitly asks for an explanation.",
             inputMode: .prompt,
+            plainTextOutput: true,
             providerID: settings.runProviderID,
             model: settings.runModel,
             inputLimit: settings.runInputLimit,
@@ -401,13 +402,19 @@ final class KeyboardViewController: UIInputViewController {
                 try Task.checkCancellation()
 
                 if settings.reviewBeforeKeyboardReplacement {
-                    state.beginConversation(
-                        title: "Ask",
-                        sourceText: input,
-                        request: request,
-                        initialResult: result,
-                        insertsResult: true
-                    )
+                    if settings.isConversationalReviewEnabled {
+                        state.beginConversation(
+                            title: "Ask",
+                            sourceText: input,
+                            request: request,
+                            initialResult: result,
+                            insertsResult: true
+                        )
+                    } else {
+                        state.result = result
+                        state.aiInsertResultMode = true
+                        state.phase = .review
+                    }
                     state.status = "Review generated answer"
                     updateHeight()
                 } else {
@@ -552,13 +559,19 @@ final class KeyboardViewController: UIInputViewController {
                 try Task.checkCancellation()
 
                 if settings.reviewBeforeKeyboardReplacement {
-                    state.beginConversation(
-                        title: request.label,
-                        sourceText: inputText,
-                        request: request,
-                        initialResult: result,
-                        insertsResult: insertsResult
-                    )
+                    if settings.isConversationalReviewEnabled {
+                        state.beginConversation(
+                            title: request.label,
+                            sourceText: inputText,
+                            request: request,
+                            initialResult: result,
+                            insertsResult: insertsResult
+                        )
+                    } else {
+                        state.result = result
+                        state.aiInsertResultMode = insertsResult
+                        state.phase = .review
+                    }
                     if insertsResult {
                         state.status = "Review before inserting"
                     } else {
