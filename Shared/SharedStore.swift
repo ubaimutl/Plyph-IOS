@@ -178,7 +178,7 @@ struct SharedStore {
         if let accessGroup = Self.accessGroup {
             base[kSecAttrAccessGroup as String] =
                 accessGroup
-        ]
+        }
 
         SecItemDelete(base as CFDictionary)
 
