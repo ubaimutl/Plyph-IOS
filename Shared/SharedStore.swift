@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 struct SharedStore {
-    static let appGroup = "group.dev.ubai.plyph"
+    static let appGroup = "group.dev.ubai.plyph2"
 
     private static let settingsKey = "plyph.settings.v1"
     private static let actionsKey = "plyph.actions.v1"
@@ -178,7 +178,7 @@ struct SharedStore {
         if let accessGroup = Self.accessGroup {
             base[kSecAttrAccessGroup as String] =
                 accessGroup
-        }
+        ]
 
         SecItemDelete(base as CFDictionary)
 
