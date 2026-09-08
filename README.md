@@ -41,10 +41,18 @@
   </tr>
   <tr>
     <td><img src="docs/images/keyboard-corrected.png" alt="Corrected text in Apple Notes"></td>
-    <td><img src="docs/images/editor.png" alt="Plyph editor"></td>
+    <td><img src="docs/images/conversation-ask-prompt.jpg" alt="Asking Plyph about a message reply in the keyboard"></td>
   </tr>
   <tr>
     <td align="center">Custom keyboard</td>
+    <td align="center">Ask from the keyboard</td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/conversation-ask-result.png" alt="Reviewing Plyph's suggested reply before inserting it"></td>
+    <td><img src="docs/images/editor.png" alt="Plyph editor"></td>
+  </tr>
+  <tr>
+    <td align="center">Conversation review</td>
     <td align="center">Editor</td>
   </tr>
   <tr>
